@@ -1,0 +1,7 @@
+# Debug files
+debug/
+*debug.lua
+*.debug
+
+# If you have a specific debug file or folder
+.vscode/
