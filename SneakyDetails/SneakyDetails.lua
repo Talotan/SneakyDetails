@@ -30,6 +30,7 @@ local SD_SavedVars
 local inInstance = false
 local InCombat = false
 local postCombatTimer = nil
+local postCombatTimerActive = false
 local optionsFrame = nil
 local buttonFadeTimer = nil
 
@@ -228,18 +229,25 @@ local function HandleCombatState(inCombat)
         if inCombat then
             -- Show Details when entering combat
             ToggleDetailsVisibility(true)
+            
+            -- Cancel any existing post-combat timer by setting the flag to false
+            if postCombatTimerActive then
+                PrintMessage("Combat re-entered, cancelling hide timer")
+                postCombatTimerActive = false
+            end
         else
             -- Handle leaving combat
             if SD_SavedVars.postCombatDelay > 0 then
-                -- Cancel any existing timer
-                if postCombatTimer then
-                    postCombatTimer = nil
-                end
+                -- Set the flag to true to indicate an active timer
+                postCombatTimerActive = true
                 
                 -- Use C_Timer for post-combat delay
-                postCombatTimer = C_Timer.After(SD_SavedVars.postCombatDelay, function()
-                    ToggleDetailsVisibility(false)
-                    postCombatTimer = nil
+                C_Timer.After(SD_SavedVars.postCombatDelay, function()
+                    -- Only hide Details if the timer is still active (not cancelled by entering combat)
+                    if postCombatTimerActive then
+                        ToggleDetailsVisibility(false)
+                        postCombatTimerActive = false
+                    end
                 end)
             else
                 -- Hide immediately if no delay

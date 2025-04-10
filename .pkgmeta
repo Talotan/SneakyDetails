@@ -1,0 +1,14 @@
+package-as: SneakyDetails
+enable-nolib-creation: no
+
+ignore:
+  - README.md
+  - .github
+  - .gitignore
+  - .pkgmeta
+
+license-output: LICENSE
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown

@@ -1,10 +1,11 @@
-## Interface: 100200
+## Interface: 110100
 ## Title: Sneaky Details
 ## Notes: Provides enhanced control over Details! Damage Meter visibility with interactive button
 ## Author: Talotan
-## Version: 1.1
+## Version: @project-version@
 ## SavedVariables: DetailsManager_SavedVars
 ## IconTexture: Interface\AddOns\SneakyDetails\Icon.tga
+## X-Curse-Project-ID: 1239449
 ## Dependencies: Details
 
 # Main addon file
