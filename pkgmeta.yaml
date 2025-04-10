@@ -1,5 +1,6 @@
 package-as: SneakyDetails
 enable-nolib-creation: no
+version: 1.0.3
 
 ignore:
   - README.md
