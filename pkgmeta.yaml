@@ -5,7 +5,7 @@ ignore:
   - README.md
   - .github
   - .gitignore
-  - .pkgmeta
+  - pkgmeta.yaml
 
 license-output: LICENSE
 
