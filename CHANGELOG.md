@@ -1,5 +1,15 @@
 # SneakyDetails Changelog
 
+## v1.0.2 (2025-04-10)
+### Added
+- none
+
+### Changed
+- None
+
+### Fixed
+- Fixed curseforge-github connection for packaging
+
 ## v1.0.1 (2025-04-10)
 ### Added
 - Updated github format
