@@ -5,7 +5,7 @@
 - Added click bind to button for opening the main Details options window
 
 ### Changed
-- Completetly rewritted to be more efficient and maintainable
+- Completetly rewritten to be more efficient and maintainable
 - Updated button to use icon
 - Removed button auto-fading
 
