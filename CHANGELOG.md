@@ -2,6 +2,18 @@
 
 ## v1.0.2 (2025-04-10)
 ### Added
+- Added click bind to button for opening the main Details options window
+
+### Changed
+- Completetly rewritted to be more efficient and maintainable
+- Updated button to use icon
+- Removed button auto-fading
+
+### Fixed
+- None
+
+## v1.0.2 (2025-04-10)
+### Added
 - none
 
 ### Changed
