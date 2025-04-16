@@ -29,8 +29,9 @@ SneakyDetails gives you smart control over when your **Details! Damage Meters** 
 Simply install the addon alongside **Details! Damage Meter**, and it will work with default settings. A small "Show/Hide" button will appear on your screen that you can:
 
 - **Left-click** to toggle Details! visibility.  
-- **Right-click** to open the settings panel.  
-- **Shift+drag** to move the button to your preferred position.
+- **Right-click** to open the SneakyDetails settings panel.  
+- **Middle-click** to open the main Details options panel
+- **Drag** to move the button to your preferred position.
 
 ---
 
@@ -39,19 +40,18 @@ Simply install the addon alongside **Details! Damage Meter**, and it will work w
 Control SneakyDetails with these simple commands:
 
 | Command               | Description                                       |
-|------------------------|---------------------------------------------------|
-| `/sd`                 | Toggle Details! visibility                        |
+|-----------------------|---------------------------------------------------|
+| `/sd toggle`          | Toggle Details! visibility                        |
 | `/sd show`            | Show Details!                                     |
 | `/sd hide`            | Hide Details!                                     |
 | `/sd options`         | Open settings panel                               |
-| `/sd combat`          | Toggle combat automation                          |
+| `/sd auto`            | Toggle combat automation                          |
 | `/sd delay <sec>`     | Set post-combat delay (0-30 seconds)              |
 | `/sd instance`        | Toggle "Always show in instances"                 |
-| `/sd button show`     | Show on-screen button                             |
-| `/sd button hide`     | Hide on-screen button                             |
-| `/sd button reset`    | Reset button position                             |
-| `/sd button fade`     | Toggle button auto-fade                           |
-| `/sd verbose`         | Toggle chat messages                              |
+| `/sd button on  `     | Show on-screen button                             |
+| `/sd button off`      | Hide on-screen button                             |
+| `/sd status`          | Display current settings                          |
+| `/sd reset`           | reset all settings to default                     |
 | `/sd help`            | Show all commands                                 |
 
 ---
@@ -71,12 +71,6 @@ Fine-tune SneakyDetails through the options panel (**right-click the button** or
 
 - **Show On-Screen Button**  
   Toggle visibility of the control button.
-
-- **Auto-Fade Button**  
-  Make the button fade out when not in use.
-
-- **Show Chat Messages**  
-  Toggle notification messages in chat.
 
 ---
 
