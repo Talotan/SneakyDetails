@@ -1,781 +1,496 @@
--- SneakyDetails - Control Details! visibility with style
-local addonName, addonTable = ...
+-- SneakyDetails
+-- Controls visibility of Details! damage meters based on combat status
 
--- Main addon frame
-local SDFrame = CreateFrame("Frame", "SneakyDetailsFrame")
-SDFrame:RegisterEvent("ADDON_LOADED")
-SDFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+local addonName, SD = ...
+local f = CreateFrame("Frame")
 
 -- Default settings
 local defaults = {
-    enabled = true,
-    combatAutomation = true,      -- Now enabled by default
-    postCombatDelay = 5,
-    disableInInstance = true,      -- Now enabled by default
+    hidingDelay = 5,
+    autoHide = true,
+    disableInInstances = true,
     showButton = true,
-    fadeButton = false,
-    lastDetailsState = true,
-    verbose = false,               -- Now disabled by default
-    buttonPosition = {
-        x = 100,
-        y = -100,
-        point = "CENTER",
-        relativeTo = "UIParent",
-        relativePoint = "CENTER"
-    }
+    buttonPosition = {point = "CENTER", relPoint = "CENTER", x = 0, y = 0},
 }
 
--- Initialize variables
-local SD_SavedVars
+-- Variables
+local combatEnd = 0
 local inInstance = false
-local InCombat = false
-local postCombatTimer = nil
-local postCombatTimerActive = false
-local optionsFrame = nil
-local buttonFadeTimer = nil
+local instanceEntered = false
+local toggleButton
+local optionsFrame
 
--- Debug function
-local function PrintMessage(message)
-    if SD_SavedVars and SD_SavedVars.verbose then
-        print("|cFF00CCFF[SneakyDetails]|r " .. message)
-    end
-end
-
--- Function to toggle visibility of Details windows
-function ToggleDetailsVisibility(show)
-    -- Check if Details is loaded
-    if not Details then
-        PrintMessage("Details! is not loaded or enabled.")
-        return
-    end
-    
-    -- Get all instances of Details
-    local instances = Details:GetAllInstances()
-    
-    -- If no instances found
-    if #instances == 0 then
-        PrintMessage("No Details! windows found.")
-        return
-    end
-    
-    -- Default behavior: if no parameter passed, toggle visibility
-    if show == nil then
-        -- Try to determine current state from first instance
-        local firstInstance = instances[1]
-        if firstInstance and firstInstance.baseframe then
-            show = not firstInstance.baseframe:IsShown()
-        else
-            show = false
-        end
-    end
-    
-    -- Loop through all instances with safe nil checks
-    for _, instance in ipairs(instances) do
-        -- Safe way to set alpha or visibility on a frame
-        local function SafeSetVisibility(frame, isVisible)
-            if frame and type(frame) == "table" then
-                if isVisible then
-                    if frame.Show and type(frame.Show) == "function" then
-                        frame:Show()
-                    end
-                    if frame.SetAlpha and type(frame.SetAlpha) == "function" then
-                        frame:SetAlpha(1)
-                    end
-                else
-                    if frame.SetAlpha and type(frame.SetAlpha) == "function" then
-                        frame:SetAlpha(0)
-                    end
-                    if frame.Hide and type(frame.Hide) == "function" then
-                        frame:Hide()
-                    end
+-- Make functions accessible in global scope for the addon
+SD.ToggleDetails = function(show)
+    if show then
+        -- Try different ways to show Details
+        if SlashCmdList["DETAILS"] then
+            SlashCmdList["DETAILS"]("show")
+        elseif _G._detalhes and _G._detalhes.OpenAllWindows then
+            _G._detalhes:OpenAllWindows()
+        elseif _G._detalhes and _G._detalhes.tabela_instancias then
+            for i, instance in ipairs(_G._detalhes.tabela_instancias) do
+                if instance.baseframe then
+                    instance.baseframe:Show()
                 end
             end
         end
-        
-        -- Handle main instance visibility
-        if show then
-            if instance.ativa ~= nil then
-                instance.ativa = true
-            end
-            if type(instance.Show) == "function" then
-                instance:Show()
-            end
-        else
-            if instance.ativa ~= nil then
-                instance.ativa = false
-            end
-            if type(instance.Hide) == "function" then
-                instance:Hide()
-            end
-        end
-        
-        -- Handle baseframe visibility
-        SafeSetVisibility(instance.baseframe, show)
-        
-        -- Handle rowframe visibility (this contains the bars)
-        SafeSetVisibility(instance.rowframe, show)
-        
-        -- Try using Details native show/hide methods if available
-        if not show and type(instance.ShutDown) == "function" then
-            instance:ShutDown()
-        elseif show and type(instance.AtivarInstancia) == "function" then
-            instance:AtivarInstancia()
-        end
-    end
-    
-    -- Simpler direct approach as a fallback
-    if not show then
-        for _, instance in ipairs(instances) do
-            if instance.baseframe then
-                instance.baseframe:Hide()
-            end
-            if instance.rowframe then
-                instance.rowframe:Hide()
-            end
-        end
     else
-        for _, instance in ipairs(instances) do
-            if instance.baseframe then
-                instance.baseframe:Show()
-            end
-            if instance.rowframe then
-                instance.rowframe:Show()
+        -- Try different ways to hide Details
+        if SlashCmdList["DETAILS"] then
+            SlashCmdList["DETAILS"]("hide")
+        elseif _G._detalhes and _G._detalhes.ShutDownAllInstances then
+            _G._detalhes:ShutDownAllInstances()
+        elseif _G._detalhes and _G._detalhes.tabela_instancias then
+            for i, instance in ipairs(_G._detalhes.tabela_instancias) do
+                if instance.baseframe then
+                    instance.baseframe:Hide()
+                end
             end
         end
     end
-    
-    PrintMessage("Details! windows are now " .. (show and "|cFF00FF00visible|r" or "|cFFFF0000hidden|r"))
-    
-    -- Save the current state
-    SD_SavedVars.lastDetailsState = show
-    
-    -- Update button appearance to match the current state
-    if SDFrame.button then
-        UpdateButtonAppearance(show)
-    end
-    
-    return show
 end
 
--- Function to update button appearance based on Details visibility
-function UpdateButtonAppearance(isVisible)
-    if not SDFrame.button then return end
-    
-    -- Set text based on visibility
-    SDFrame.button.text:SetText(isVisible and "Hide" or "Show")
-    
-    -- Set background color based on visibility
-    SDFrame.button.backdrop:SetBackdropColor(
-        isVisible and 0.1 or 0.3,  -- Red component
-        isVisible and 0.3 or 0.1,  -- Green component
-        0.1,                       -- Blue component
-        0.8                        -- Alpha
-    )
-end
-
--- Function to check if a Details window is visible
-local function IsDetailsVisible()
-    if not Details then return SD_SavedVars.lastDetailsState end
-    
-    local instances = Details:GetAllInstances()
-    if #instances == 0 then return SD_SavedVars.lastDetailsState end
-    
-    local firstInstance = instances[1]
-    return firstInstance and firstInstance.baseframe and firstInstance.baseframe:IsShown()
-end
-
--- Function to fade the button in/out
-local function FadeButton(fadeIn)
-    if not SDFrame.button or not SD_SavedVars.fadeButton then return end
-    
-    -- Cancel any existing fade timer
-    if buttonFadeTimer then
-        C_Timer.After(0, function() 
-            buttonFadeTimer = nil 
-        end)
-    end
-    
-    if fadeIn then
-        -- Fade in (show button)
-        SDFrame.button:SetAlpha(1)
-        
-        -- Set timer to fade out
-        buttonFadeTimer = C_Timer.After(5, function()
-            -- Fade out after 5 seconds
-            if SDFrame.button and SD_SavedVars.fadeButton then
-                SDFrame.button:SetAlpha(0)
-            end
-            buttonFadeTimer = nil
-        end)
-    else
-        -- Fade out (hide button)
-        SDFrame.button:SetAlpha(0)
-    end
-end
-
--- Simplified combat handling function
-local function HandleCombatState(inCombat)
-    -- Set global combat state
-    InCombat = inCombat
-    
-    -- If in an instance with "Always Show in Instances" enabled
-    if inInstance and SD_SavedVars.disableInInstance then
-        ToggleDetailsVisibility(true)
+-- Create a standalone options frame
+SD.CreateOptionsFrame = function()
+    if optionsFrame then
+        optionsFrame:Show()
         return
     end
     
-    -- If combat automation is enabled
-    if SD_SavedVars.combatAutomation then
-        if inCombat then
-            -- Show Details when entering combat
-            ToggleDetailsVisibility(true)
-            
-            -- Cancel any existing post-combat timer by setting the flag to false
-            if postCombatTimerActive then
-                PrintMessage("Combat re-entered, cancelling hide timer")
-                postCombatTimerActive = false
-            end
-        else
-            -- Handle leaving combat
-            if SD_SavedVars.postCombatDelay > 0 then
-                -- Set the flag to true to indicate an active timer
-                postCombatTimerActive = true
-                
-                -- Use C_Timer for post-combat delay
-                C_Timer.After(SD_SavedVars.postCombatDelay, function()
-                    -- Only hide Details if the timer is still active (not cancelled by entering combat)
-                    if postCombatTimerActive then
-                        ToggleDetailsVisibility(false)
-                        postCombatTimerActive = false
-                    end
-                end)
-            else
-                -- Hide immediately if no delay
-                ToggleDetailsVisibility(false)
-            end
-        end
-    end
-end
-
--- Function to toggle button visibility
-local function UpdateButtonVisibility()
-    if SDFrame.button then
-        if SD_SavedVars.showButton then
-            SDFrame.button:Show()
-            -- Set initial alpha based on fade setting
-            if SD_SavedVars.fadeButton then
-                SDFrame.button:SetAlpha(0)
-            else
-                SDFrame.button:SetAlpha(1)
-            end
-        else
-            SDFrame.button:Hide()
-        end
-    end
-end
-
--- Create a standalone options panel
-local function CreateOptionsFrame()
-    -- If the frame already exists, just show it and return
-    if optionsFrame then
-        -- Update values in case they changed elsewhere
-        if optionsFrame.delaySlider then
-            optionsFrame.delaySlider:SetValue(SD_SavedVars.postCombatDelay)
-        end
-        if optionsFrame.combatCheck then
-            optionsFrame.combatCheck:SetChecked(SD_SavedVars.combatAutomation)
-        end
-        if optionsFrame.instanceCheck then
-            optionsFrame.instanceCheck:SetChecked(SD_SavedVars.disableInInstance)
-        end
-        if optionsFrame.buttonCheck then
-            optionsFrame.buttonCheck:SetChecked(SD_SavedVars.showButton)
-        end
-        if optionsFrame.fadeCheck then
-            optionsFrame.fadeCheck:SetChecked(SD_SavedVars.fadeButton)
-        end
-        if optionsFrame.verboseCheck then
-            optionsFrame.verboseCheck:SetChecked(SD_SavedVars.verbose)
-        end
-        optionsFrame:Show()
-        return optionsFrame
-    end
-    
     -- Create the main frame
-    optionsFrame = CreateFrame("Frame", "SneakyDetailsOptions", UIParent, "BackdropTemplate")
-    optionsFrame:SetSize(250, 360) -- More compact size
+    optionsFrame = CreateFrame("Frame", "SneakyDetailsOptionsFrame", UIParent, "BasicFrameTemplateWithInset")
+    optionsFrame:SetSize(300, 300)  -- Changed to 300x300 as requested
     optionsFrame:SetPoint("CENTER")
-    optionsFrame:SetFrameStrata("DIALOG")
     optionsFrame:SetMovable(true)
     optionsFrame:EnableMouse(true)
     optionsFrame:RegisterForDrag("LeftButton")
     optionsFrame:SetScript("OnDragStart", optionsFrame.StartMoving)
     optionsFrame:SetScript("OnDragStop", optionsFrame.StopMovingOrSizing)
+    optionsFrame:SetClampedToScreen(true)
     
-    -- Set backdrop
-    optionsFrame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true,
-        tileSize = 32,
-        edgeSize = 32,
-        insets = { left = 8, right = 8, top = 8, bottom = 8 }
-    })
+    -- Set the title
+    optionsFrame.title = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    optionsFrame.title:SetPoint("TOP", optionsFrame, "TOP", 0, -5)
+    optionsFrame.title:SetText("SneakyDetails Options")
     
-    -- Create title text
-    local title = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", 0, -15)
-    title:SetText("SneakyDetails Options")
-    
-    -- Combat Automation checkbox
-    local combatCheck = CreateFrame("CheckButton", "SneakyDetailsCombatCheck", optionsFrame, "UICheckButtonTemplate")
-    combatCheck:SetPoint("TOPLEFT", 30, -50)
-    _G[combatCheck:GetName() .. "Text"]:SetText("Combat Automation")
-    combatCheck:SetChecked(SD_SavedVars.combatAutomation)
-    combatCheck:SetScript("OnClick", function(self)
-        SD_SavedVars.combatAutomation = self:GetChecked()
+    -- Auto-Hide checkbox
+    local autoHideCheckbox = CreateFrame("CheckButton", "SneakyDetailsAutoHideCheckbox", optionsFrame, "UICheckButtonTemplate")
+    autoHideCheckbox:SetPoint("TOPLEFT", optionsFrame, "TOPLEFT", 20, -40)
+    autoHideCheckbox.text:SetText("Auto-Hide")
+    autoHideCheckbox.tooltipText = "Automatically hide Details when out of combat"
+    autoHideCheckbox:SetChecked(SneakyDetailsDB.autoHide)
+    autoHideCheckbox:SetScript("OnClick", function(self)
+        SneakyDetailsDB.autoHide = self:GetChecked()
+        print("|cff33ff99SneakyDetails|r: Auto-hiding " .. (SneakyDetailsDB.autoHide and "enabled" or "disabled") .. ".")
     end)
-    optionsFrame.combatCheck = combatCheck
     
-    -- Create a helper function for text labels
-    local function CreateLabel(parent, text, anchorFrame, xOffset, yOffset)
-        local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        label:SetPoint("TOPLEFT", anchorFrame, "BOTTOMLEFT", xOffset, yOffset)
-        label:SetText(text)
-        return label
-    end
+    -- Delay text
+    local delayText = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    delayText:SetPoint("TOPLEFT", autoHideCheckbox, "BOTTOMLEFT", 0, -20)
+    delayText:SetText("Hide Delay (seconds):")
     
-    -- Post-Combat Delay text and slider
-    local delayLabel = CreateLabel(optionsFrame, "Post-Combat Delay: " .. SD_SavedVars.postCombatDelay .. "s", combatCheck, 0, -12)
-    optionsFrame.delayLabel = delayLabel
-    
+    -- Hiding Delay slider
     local delaySlider = CreateFrame("Slider", "SneakyDetailsDelaySlider", optionsFrame, "OptionsSliderTemplate")
-    delaySlider:SetPoint("TOPLEFT", delayLabel, "BOTTOMLEFT", 0, -5)
-    delaySlider:SetWidth(180) -- Reduced width
+    delaySlider:SetPoint("TOPLEFT", delayText, "BOTTOMLEFT", 0, -15)
+    delaySlider:SetWidth(260)
     delaySlider:SetMinMaxValues(0, 30)
-    delaySlider:SetValue(SD_SavedVars.postCombatDelay)
     delaySlider:SetValueStep(1)
     delaySlider:SetObeyStepOnDrag(true)
-    optionsFrame.delaySlider = delaySlider
+    delaySlider:SetValue(SneakyDetailsDB.hidingDelay)
+    getglobal(delaySlider:GetName() .. "Low"):SetText("0")
+    getglobal(delaySlider:GetName() .. "High"):SetText("30")
+    getglobal(delaySlider:GetName() .. "Text"):SetText(SneakyDetailsDB.hidingDelay)
     
-    -- Set slider texts
-    _G[delaySlider:GetName() .. "Low"]:SetText("0s")
-    _G[delaySlider:GetName() .. "High"]:SetText("30s")
-    
-    -- Update slider value when changed
     delaySlider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5) -- Round to nearest integer
-        SD_SavedVars.postCombatDelay = value
-        delayLabel:SetText("Post-Combat Delay: " .. value .. "s")
-        
-        -- If there is an active post-combat timer, update it
-        if postCombatTimer then
-            C_Timer.After(0, function()
-                postCombatTimer = C_Timer.After(value, function()
-                    ToggleDetailsVisibility(false)
-                    postCombatTimer = nil
-                end)
-            end)
-        end
+        value = math.floor(value + 0.5)
+        SneakyDetailsDB.hidingDelay = value
+        getglobal(self:GetName() .. "Text"):SetText(value)
+        -- Removed chat message for delay change
     end)
     
-    -- Always show in instances checkbox
-    local instanceCheck = CreateFrame("CheckButton", "SneakyDetailsInstanceCheck", optionsFrame, "UICheckButtonTemplate")
-    instanceCheck:SetPoint("TOPLEFT", delaySlider, "BOTTOMLEFT", 0, -25)
-    _G[instanceCheck:GetName() .. "Text"]:SetText("Always Show in Instances")
-    instanceCheck:SetChecked(SD_SavedVars.disableInInstance)
-    instanceCheck:SetScript("OnClick", function(self)
-        SD_SavedVars.disableInInstance = self:GetChecked()
-        -- If we're in an instance now, update visibility
-        if inInstance and SD_SavedVars.disableInInstance then
-            ToggleDetailsVisibility(true)
-        end
+    -- Instance behavior checkbox
+    local instanceCheckbox = CreateFrame("CheckButton", "SneakyDetailsInstanceCheckbox", optionsFrame, "UICheckButtonTemplate")
+    instanceCheckbox:SetPoint("TOPLEFT", delaySlider, "BOTTOMLEFT", 0, -20)
+    instanceCheckbox.text:SetText("Always Show in Instances")
+    instanceCheckbox.tooltipText = "Always show Details when in dungeons, raids or scenarios"
+    instanceCheckbox:SetChecked(SneakyDetailsDB.disableInInstances)
+    instanceCheckbox:SetScript("OnClick", function(self)
+        SneakyDetailsDB.disableInInstances = self:GetChecked()
+        print("|cff33ff99SneakyDetails|r: Auto-hiding in instances " .. (SneakyDetailsDB.disableInInstances and "disabled" or "enabled") .. ".")
     end)
-    optionsFrame.instanceCheck = instanceCheck
     
-    -- Show Button checkbox
-    local buttonCheck = CreateFrame("CheckButton", "SneakyDetailsButtonCheck", optionsFrame, "UICheckButtonTemplate")
-    buttonCheck:SetPoint("TOPLEFT", instanceCheck, "BOTTOMLEFT", 0, -5)
-    _G[buttonCheck:GetName() .. "Text"]:SetText("Show On-Screen Button")
-    buttonCheck:SetChecked(SD_SavedVars.showButton)
-    buttonCheck:SetScript("OnClick", function(self)
-        SD_SavedVars.showButton = self:GetChecked()
-        UpdateButtonVisibility()
-    end)
-    optionsFrame.buttonCheck = buttonCheck
-    
-    -- Fade Button checkbox
-    local fadeCheck = CreateFrame("CheckButton", "SneakyDetailsFadeCheck", optionsFrame, "UICheckButtonTemplate")
-    fadeCheck:SetPoint("TOPLEFT", buttonCheck, "BOTTOMLEFT", 0, -5)
-    _G[fadeCheck:GetName() .. "Text"]:SetText("Auto-Fade Button")
-    fadeCheck:SetChecked(SD_SavedVars.fadeButton)
-    fadeCheck:SetScript("OnClick", function(self)
-        SD_SavedVars.fadeButton = self:GetChecked()
-        -- Update immediately
-        if SDFrame.button then
-            if self:GetChecked() then
-                SDFrame.button:SetAlpha(0)
+    -- Toggle button checkbox
+    local buttonCheckbox = CreateFrame("CheckButton", "SneakyDetailsButtonCheckbox", optionsFrame, "UICheckButtonTemplate")
+    buttonCheckbox:SetPoint("TOPLEFT", instanceCheckbox, "BOTTOMLEFT", 0, -20)
+    buttonCheckbox.text:SetText("Show Toggle Button")
+    buttonCheckbox.tooltipText = "Show a movable button to toggle Details visibility"
+    buttonCheckbox:SetChecked(SneakyDetailsDB.showButton)
+    buttonCheckbox:SetScript("OnClick", function(self)
+        SneakyDetailsDB.showButton = self:GetChecked()
+        if SneakyDetailsDB.showButton then
+            if not toggleButton then
+                SD.CreateToggleButton()
             else
-                SDFrame.button:SetAlpha(1)
+                toggleButton:Show()
             end
+            print("|cff33ff99SneakyDetails|r: Toggle button enabled.")
+        else
+            if toggleButton then
+                toggleButton:Hide()
+            end
+            print("|cff33ff99SneakyDetails|r: Toggle button disabled.")
         end
     end)
-    optionsFrame.fadeCheck = fadeCheck
     
-    -- Verbose Output checkbox
-    local verboseCheck = CreateFrame("CheckButton", "SneakyDetailsVerboseCheck", optionsFrame, "UICheckButtonTemplate")
-    verboseCheck:SetPoint("TOPLEFT", fadeCheck, "BOTTOMLEFT", 0, -5)
-    _G[verboseCheck:GetName() .. "Text"]:SetText("Show Chat Messages")
-    verboseCheck:SetChecked(SD_SavedVars.verbose)
-    verboseCheck:SetScript("OnClick", function(self)
-        SD_SavedVars.verbose = self:GetChecked()
+    -- Done button
+    local doneButton = CreateFrame("Button", nil, optionsFrame, "UIPanelButtonTemplate")
+    doneButton:SetSize(100, 25)
+    doneButton:SetPoint("BOTTOM", 0, 15)
+    doneButton:SetText("Done")
+    doneButton:SetScript("OnClick", function()
+        optionsFrame:Hide()
     end)
-    optionsFrame.verboseCheck = verboseCheck
-    
-    -- Close button
-    local closeButton = CreateFrame("Button", nil, optionsFrame, "UIPanelButtonTemplate")
-    closeButton:SetSize(100, 25)
-    closeButton:SetPoint("BOTTOM", 0, 20) -- Slightly more padding
-    closeButton:SetText("Close")
-    closeButton:SetScript("OnClick", function() optionsFrame:Hide() end)
-    
-    -- Make Escape key close the panel
-    tinsert(UISpecialFrames, optionsFrame:GetName())
-    
-    return optionsFrame
 end
 
--- Create a draggable button for the addon
-local function CreateButton()
-    -- Main button frame
-    local button = CreateFrame("Button", "SneakyDetailsButton", UIParent)
-    button:SetSize(50, 25) -- Adjusted size for text-only button
-    button:SetFrameStrata("MEDIUM")
-    button:SetFrameLevel(5)
+-- Create a toggle button for Details
+SD.CreateToggleButton = function()
+    -- Create the button
+    toggleButton = CreateFrame("Button", "SneakyDetailsToggleButton", UIParent)
+    toggleButton:SetSize(24, 24)  -- Changed to 24x24 as requested
+    toggleButton:SetPoint("CENTER", UIParent, "CENTER", 0, 0) -- Default position
     
-    -- Initialize buttonPosition if it doesn't exist yet
-    if not SD_SavedVars.buttonPosition then
-        SD_SavedVars.buttonPosition = {
-            x = 100,
-            y = -100,
-            point = "CENTER",
-            relativeTo = "UIParent",
-            relativePoint = "CENTER"
-        }
+    -- Make the button movable
+    toggleButton:SetMovable(true)
+    toggleButton:EnableMouse(true)
+    toggleButton:RegisterForDrag("LeftButton")
+    toggleButton:SetScript("OnDragStart", toggleButton.StartMoving)
+    toggleButton:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        -- Save position for future sessions
+        local point, _, relPoint, x, y = self:GetPoint()
+        SneakyDetailsDB.buttonPosition = {point = point, relPoint = relPoint, x = x, y = y}
+    end)
+    
+    -- Set up the button textures
+    local iconPath = "Interface\\AddOns\\SneakyDetails\\icon"
+    local iconBWPath = "Interface\\AddOns\\SneakyDetails\\icon-bw"
+    
+    -- Check if the files exist (this check isn't 100% reliable but helps)
+    local fileExists = true
+    local bwFileExists = true
+    
+    pcall(function() 
+        local test = GetFileIDFromPath(iconPath)
+        if not test or test == 0 then fileExists = false end
+    end)
+    
+    pcall(function() 
+        local test = GetFileIDFromPath(iconBWPath)
+        if not test or test == 0 then bwFileExists = false end
+    end)
+    
+    -- Use fallback if icons not found
+    if not fileExists then
+        iconPath = "Interface\\Icons\\Ability_Rogue_Disguise"  -- A stealth icon, good for "Sneaky" Details
     end
     
-    -- Set initial position from saved variables
-    local pos = SD_SavedVars.buttonPosition
-    button:SetPoint(pos.point, pos.relativeTo, pos.relativePoint, pos.x, pos.y)
-    
-    -- Make button movable
-    button:SetMovable(true)
-    button:RegisterForDrag("LeftButton")
-    button:SetScript("OnDragStart", function(self)
-        if IsShiftKeyDown() then
-            self:StartMoving()
+    if not bwFileExists then
+        iconBWPath = "Interface\\Icons\\Ability_Rogue_Disguise_Ghost"  -- Desaturated version
+        if not GetFileIDFromPath(iconBWPath) then
+            iconBWPath = iconPath -- Fallback to same icon if ghost version doesn't exist
         end
-    end)
-    button:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        -- Save position
-        local point, relativeTo, relativePoint, x, y = self:GetPoint()
-        SD_SavedVars.buttonPosition = {
-            point = point,
-            relativeTo = relativeTo and relativeTo:GetName() or "UIParent",
-            relativePoint = relativePoint,
-            x = x,
-            y = y
-        }
-    end)
+    end
     
-    -- Create backdrop using BackdropTemplate
-    local backdrop = CreateFrame("Frame", nil, button, "BackdropTemplate")
-    backdrop:SetAllPoints(button)
-    backdrop:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true,
-        tileSize = 16,
-        edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 }
-    })
+    -- Set initial texture based on Details visibility
+    local detailsObject = _G._detalhes and _G._detalhes.tabela_instancias and _G._detalhes.tabela_instancias[1]
+    local isVisible = detailsObject and detailsObject.baseframe and detailsObject.baseframe:IsShown()
     
-    -- Set initial color based on Details visibility
-    local isVisible = IsDetailsVisible()
-    backdrop:SetBackdropColor(
-        isVisible and 0.1 or 0.3,  -- Red component
-        isVisible and 0.3 or 0.1,  -- Green component
-        0.1,                       -- Blue component
-        0.8                        -- Alpha
-    )
-    backdrop:SetBackdropBorderColor(0.7, 0.7, 0.7, 0.8)
-    button.backdrop = backdrop
+    if isVisible then
+        toggleButton:SetNormalTexture(iconPath)
+        toggleButton:SetPushedTexture(iconPath)
+    else
+        toggleButton:SetNormalTexture(iconBWPath)
+        toggleButton:SetPushedTexture(iconBWPath)
+    end
     
-    -- Add the text (centered now that there's no icon)
-    local text = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    text:SetPoint("CENTER", 0, 0)
-    text:SetText(isVisible and "Hide" or "Show")
-    button.text = text
-    
-    -- Setup button clicks
-    button:RegisterForClicks("AnyUp")
-    
-    -- Handle clicks with separate handlers for each mouse button
-    button:SetScript("OnClick", function(self, btnType)
-        if btnType == "LeftButton" then
-            ToggleDetailsVisibility()
-        elseif btnType == "RightButton" then
-            -- Show standalone options panel
-            CreateOptionsFrame()
-        end
-    end)
+    -- Make the pushed texture slightly smaller to give a "pressed" effect
+    local pushed = toggleButton:GetPushedTexture()
+    pushed:ClearAllPoints()
+    pushed:SetPoint("TOPLEFT", toggleButton, "TOPLEFT", 2, -2)
+    pushed:SetPoint("BOTTOMRIGHT", toggleButton, "BOTTOMRIGHT", -2, 2)
     
     -- Add tooltip
-    button:SetScript("OnEnter", function(self)
-        -- Show tooltip
+    toggleButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("SneakyDetails")
-        GameTooltip:AddLine("Left-click: Toggle Details! windows", 1, 1, 1)
-        GameTooltip:AddLine("Right-click: Open settings panel", 1, 1, 1)
-        GameTooltip:AddLine("Shift+drag: Move this button", 0.7, 0.7, 1)
+        GameTooltip:AddLine("Left-click: Toggle Details visibility", 1, 1, 1)
+        GameTooltip:AddLine("Right-click: Open SneakyDetails options", 1, 1, 1)
+        GameTooltip:AddLine("Middle-click: Open Details! options", 1, 1, 1)
+        GameTooltip:AddLine("Drag: Move button", 1, 1, 1)
         GameTooltip:Show()
-        
-        -- Fade in button if auto-fade is enabled
-        if SD_SavedVars.fadeButton then
-            FadeButton(true)
-        end
     end)
-    
-    button:SetScript("OnLeave", function()
+    toggleButton:SetScript("OnLeave", function(self)
         GameTooltip:Hide()
     end)
     
-    -- Set initial visibility based on saved setting
-    if not SD_SavedVars.showButton then
-        button:Hide()
-    else
-        -- Set initial alpha based on fade setting
-        if SD_SavedVars.fadeButton then
-            button:SetAlpha(0)
-        else
-            button:SetAlpha(1)
+    -- Handle button clicks
+    toggleButton:RegisterForClicks("LeftButtonUp", "RightButtonUp", "MiddleButtonUp")
+    toggleButton:SetScript("OnClick", function(self, button)
+        if button == "LeftButton" then
+            -- Toggle Details visibility
+            local detailsObject = _G._detalhes and _G._detalhes.tabela_instancias and _G._detalhes.tabela_instancias[1]
+            local isVisible = detailsObject and detailsObject.baseframe and detailsObject.baseframe:IsShown()
+            SD.ToggleDetails(not isVisible)
+            
+            -- Update button texture based on new visibility state
+            if not isVisible then -- It will become visible
+                self:SetNormalTexture(iconPath)
+                self:SetPushedTexture(iconPath)
+            else -- It will become hidden
+                self:SetNormalTexture(iconBWPath)
+                self:SetPushedTexture(iconBWPath)
+            end
+            
+            -- Make sure the pushed texture stays properly sized
+            local pushed = self:GetPushedTexture()
+            pushed:ClearAllPoints()
+            pushed:SetPoint("TOPLEFT", self, "TOPLEFT", 2, -2)
+            pushed:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", -2, 2)
+        elseif button == "RightButton" then
+            -- Open options window
+            SD.CreateOptionsFrame()
+        elseif button == "MiddleButton" then
+            -- Open official Details options
+            if SlashCmdList["DETAILS"] then
+                SlashCmdList["DETAILS"]("options")
+            elseif _G._detalhes and _G._detalhes.OpenOptionsWindow then
+                _G._detalhes:OpenOptionsWindow()
+            else
+                -- Fallback if the above methods don't work
+                ChatFrame1:AddMessage("|cff33ff99SneakyDetails|r: Unable to open Details! options directly. Try typing /details options")
+            end
+        end
+    end)
+    
+    -- Restore saved position if available
+    if SneakyDetailsDB.buttonPosition then
+        toggleButton:ClearAllPoints()
+        toggleButton:SetPoint(
+            SneakyDetailsDB.buttonPosition.point,
+            UIParent,
+            SneakyDetailsDB.buttonPosition.relPoint,
+            SneakyDetailsDB.buttonPosition.x,
+            SneakyDetailsDB.buttonPosition.y
+        )
+    end
+    
+    -- Update icon when Details visibility changes from other sources
+    if not SD.HookDetailsVisibility then
+        SD.HookDetailsVisibility = true
+        -- Hook the ToggleDetails function to update our button
+        local originalToggleDetails = SD.ToggleDetails
+        SD.ToggleDetails = function(show)
+            originalToggleDetails(show)
+            
+            -- Only update if our button exists
+            if toggleButton and toggleButton:IsShown() then
+                if show then
+                    toggleButton:SetNormalTexture(iconPath)
+                    toggleButton:SetPushedTexture(iconPath)
+                else
+                    toggleButton:SetNormalTexture(iconBWPath)
+                    toggleButton:SetPushedTexture(iconBWPath)
+                end
+                
+                -- Make sure the pushed texture stays properly sized
+                local pushed = toggleButton:GetPushedTexture()
+                pushed:ClearAllPoints()
+                pushed:SetPoint("TOPLEFT", toggleButton, "TOPLEFT", 2, -2)
+                pushed:SetPoint("BOTTOMRIGHT", toggleButton, "BOTTOMRIGHT", -2, 2)
+            end
+        end
+    end
+end
+
+-- Initialize addon
+local function Initialize()
+    -- Load saved variables
+    SneakyDetailsDB = SneakyDetailsDB or {}
+    
+    -- Apply defaults for any missing values
+    for k, v in pairs(defaults) do
+        if SneakyDetailsDB[k] == nil then
+            SneakyDetailsDB[k] = v
         end
     end
     
-    return button
-end
-
--- Setup slash commands
-local function SetupCommands()
-    -- Create binding name
-    _G["BINDING_NAME_SNEAKYDETAILS_TOGGLE"] = "Toggle Details! Visibility"
+    -- Create the toggle button if enabled
+    if SneakyDetailsDB.showButton then
+        SD.CreateToggleButton()
+    end
     
-    -- Create slash command to toggle visibility
-    SLASH_SNEAKYDETAILS1 = "/sdetails"
-    SLASH_SNEAKYDETAILS2 = "/sd"
-    SlashCmdList["SNEAKYDETAILS"] = function(msg)
-        local cmd, arg = strsplit(" ", msg:lower(), 2)
-        
-        if cmd == "toggle" or cmd == "" then
-            ToggleDetailsVisibility()
-        elseif cmd == "show" then
-            ToggleDetailsVisibility(true)
-        elseif cmd == "hide" then
-            ToggleDetailsVisibility(false)
-        elseif cmd == "button" then
-            if arg == "show" then
-                SD_SavedVars.showButton = true
-                UpdateButtonVisibility()
-                PrintMessage("Button shown")
-            elseif arg == "hide" then
-                SD_SavedVars.showButton = false
-                UpdateButtonVisibility()
-                PrintMessage("Button hidden")
-            elseif arg == "reset" then
-                -- Reset button position to default
-                local defaultPos = defaults.buttonPosition
-                SDFrame.button:ClearAllPoints()
-                SDFrame.button:SetPoint(defaultPos.point, defaultPos.relativeTo, defaultPos.relativePoint, defaultPos.x, defaultPos.y)
-                SD_SavedVars.buttonPosition = {
-                    point = defaultPos.point,
-                    relativeTo = defaultPos.relativeTo,
-                    relativePoint = defaultPos.relativePoint,
-                    x = defaultPos.x,
-                    y = defaultPos.y
-                }
-                PrintMessage("Button position reset")
-            elseif arg == "fade" then
-                SD_SavedVars.fadeButton = not SD_SavedVars.fadeButton
-                PrintMessage("Button fading " .. (SD_SavedVars.fadeButton and "enabled" or "disabled"))
-                
-                -- Update button immediately
-                if SDFrame.button then
-                    if SD_SavedVars.fadeButton then
-                        SDFrame.button:SetAlpha(0)
-                    else
-                        SDFrame.button:SetAlpha(1)
-                    end
-                end
-                
-                -- Update options frame if it's open
-                if optionsFrame and optionsFrame:IsShown() and optionsFrame.fadeCheck then
-                    optionsFrame.fadeCheck:SetChecked(SD_SavedVars.fadeButton)
-                end
-            else
-                PrintMessage("Button options: show, hide, reset, fade")
-            end
-        elseif cmd == "combat" then
-            SD_SavedVars.combatAutomation = not SD_SavedVars.combatAutomation
-            PrintMessage("Combat automation " .. 
-                (SD_SavedVars.combatAutomation and "enabled" or "disabled"))
-            
-            -- Update options frame if it's open
-            if optionsFrame and optionsFrame:IsShown() and optionsFrame.combatCheck then
-                optionsFrame.combatCheck:SetChecked(SD_SavedVars.combatAutomation)
-            end
-        elseif cmd == "delay" then
-            local delay = tonumber(arg)
-            if delay and delay >= 0 and delay <= 30 then
-                SD_SavedVars.postCombatDelay = delay
-                PrintMessage("Post-combat delay set to " .. delay .. " seconds")
-                
-                -- Update options frame if it's open
-                if optionsFrame and optionsFrame:IsShown() then
-                    if optionsFrame.delaySlider then
-                        optionsFrame.delaySlider:SetValue(delay)
-                    end
-                    if optionsFrame.delayLabel then
-                        optionsFrame.delayLabel:SetText("Post-Combat Delay: " .. delay .. "s")
-                    end
-                end
-            else
-                PrintMessage("Delay must be between 0 and 30 seconds")
-            end
-        elseif cmd == "instance" then
-            SD_SavedVars.disableInInstance = not SD_SavedVars.disableInInstance
-            PrintMessage("Always show in instances " .. 
-                (SD_SavedVars.disableInInstance and "enabled" or "disabled"))
-            
-            -- Update options frame if it's open
-            if optionsFrame and optionsFrame:IsShown() and optionsFrame.instanceCheck then
-                optionsFrame.instanceCheck:SetChecked(SD_SavedVars.disableInInstance)
-            end
-        elseif cmd == "verbose" then
-            SD_SavedVars.verbose = not SD_SavedVars.verbose
-            -- Force print this message regardless of verbose setting
-            print("|cFF00CCFF[SneakyDetails]|r Chat messages " .. 
-                (SD_SavedVars.verbose and "enabled" or "disabled"))
-            
-            -- Update options frame if it's open
-            if optionsFrame and optionsFrame:IsShown() and optionsFrame.verboseCheck then
-                optionsFrame.verboseCheck:SetChecked(SD_SavedVars.verbose)
-            end
-        elseif cmd == "options" or cmd == "config" then
-            -- Show options panel
-            CreateOptionsFrame()
-        elseif cmd == "help" then
-            print("|cFF00CCFF[SneakyDetails]|r Commands:")
-            print("  /sd - Toggle Details! visibility")
-            print("  /sd show - Show Details!")
-            print("  /sd hide - Hide Details!")
-            print("  /sd button show/hide/reset/fade - Control the button")
-            print("  /sd combat - Toggle combat automation")
-            print("  /sd delay <seconds> - Set post-combat delay (0-30)")
-            print("  /sd instance - Toggle always showing in instances")
-            print("  /sd verbose - Toggle chat messages")
-            print("  /sd options - Open options panel")
-            print("  /sd help - Show this help message")
-        end
-    end
+    -- Print loading message
+    print("|cff33ff99SneakyDetails|r loaded. Type |cffFFFF00/sd help|r for commands.")
 end
 
--- Helper function to ensure all saved variables exist
-local function EnsureSavedVariables()
-    -- Create missing fields with default values
-    for key, value in pairs(defaults) do
-        if SD_SavedVars[key] == nil then
-            if type(value) == "table" then
-                SD_SavedVars[key] = {}
-                for k, v in pairs(value) do
-                    SD_SavedVars[key][k] = v
-                end
-            else
-                SD_SavedVars[key] = value
-            end
-        end
-    end
-end
+-- Handle events
+f:RegisterEvent("PLAYER_REGEN_DISABLED")
+f:RegisterEvent("PLAYER_REGEN_ENABLED")
+f:RegisterEvent("PLAYER_ENTERING_WORLD")
+f:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+f:RegisterEvent("ADDON_LOADED")
 
--- Event handler function
-local function OnEvent(self, event, arg1, ...)
-    if event == "ADDON_LOADED" and arg1 == addonName then
-        -- Initialize saved variables
-        if not SneakyDetails_SavedVars then
-            SneakyDetails_SavedVars = {}
-            for k, v in pairs(defaults) do
-                if type(v) == "table" then
-                    SneakyDetails_SavedVars[k] = {}
-                    for k2, v2 in pairs(v) do
-                        SneakyDetails_SavedVars[k][k2] = v2
-                    end
-                else
-                    SneakyDetails_SavedVars[k] = v
-                end
-            end
+f:SetScript("OnEvent", function(self, event, arg1)
+    if event == "PLAYER_REGEN_DISABLED" then
+        -- Entered combat, show Details
+        if SneakyDetailsDB.autoHide and not (inInstance and SneakyDetailsDB.disableInInstances) then
+            SD.ToggleDetails(true)
         end
-        
-        SD_SavedVars = SneakyDetails_SavedVars
-        
-        -- Make sure all needed saved variables exist
-        EnsureSavedVariables()
-        
-        -- Create the button
-        self.button = CreateButton()
-        
-        -- Setup commands
-        SetupCommands()
-        
-        -- Register additional events now that we're initialized
-        self:RegisterEvent("PLAYER_REGEN_DISABLED")
-        self:RegisterEvent("PLAYER_REGEN_ENABLED")
-        self:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-        
-        -- Print loaded message
-        PrintMessage("Addon loaded. Type /sd help for available commands.")
-    elseif event == "PLAYER_ENTERING_WORLD" then
-        -- Check if player is in an instance
-        local isInstance, instanceType = IsInInstance()
-        inInstance = isInstance and (instanceType == "raid" or instanceType == "party")
-        
-        -- Set Details visibility based on saved state
-        C_Timer.After(1, function()
-            -- Slight delay to ensure Details has fully loaded
-            if Details then
-                if inInstance and SD_SavedVars.disableInInstance then
-                    ToggleDetailsVisibility(true)
-                else
-                    ToggleDetailsVisibility(SD_SavedVars.lastDetailsState)
-                end
-            end
-        end)
-    elseif event == "ZONE_CHANGED_NEW_AREA" then
-        -- Check if player is in an instance
-        local isInstance, instanceType = IsInInstance()
-        inInstance = isInstance and (instanceType == "raid" or instanceType == "party")
-        
-        -- Update visibility based on instance settings
-        if inInstance and SD_SavedVars.disableInInstance then
-            ToggleDetailsVisibility(true)
-        end
-    elseif event == "PLAYER_REGEN_DISABLED" then
-        -- Player entered combat
-        HandleCombatState(true)
     elseif event == "PLAYER_REGEN_ENABLED" then
-        -- Player left combat
-        HandleCombatState(false)
+        -- Exited combat, start timer
+        combatEnd = GetTime()
+    elseif event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
+        -- Check if we're in an instance
+        local inInst, instanceType = IsInInstance()
+        inInstance = inInst and (instanceType == "party" or instanceType == "raid" or instanceType == "scenario")
+        
+        -- If we just entered an instance and have the setting enabled, show Details
+        if inInstance and SneakyDetailsDB.disableInInstances and not instanceEntered then
+            SD.ToggleDetails(true)
+            instanceEntered = true
+        elseif not inInstance and instanceEntered then
+            instanceEntered = false
+        end
+    elseif event == "ADDON_LOADED" and arg1 == addonName then
+        -- Initialize on load
+        Initialize()
+    end
+end)
+
+-- Handle update (for timer)
+f:SetScript("OnUpdate", function(self, elapsed)
+    if combatEnd > 0 and SneakyDetailsDB.autoHide and SneakyDetailsDB.hidingDelay > 0 and 
+        not InCombatLockdown() and not (inInstance and SneakyDetailsDB.disableInInstances) then
+        
+        local timePassed = GetTime() - combatEnd
+        
+        if timePassed >= SneakyDetailsDB.hidingDelay then
+            SD.ToggleDetails(false)
+            combatEnd = 0
+        end
+    end
+end)
+
+-- Slash commands
+SLASH_SNEAKYDETAILS1 = "/sneakydetails"
+SLASH_SNEAKYDETAILS2 = "/sd"
+
+SlashCmdList["SNEAKYDETAILS"] = function(msg)
+    local args = {}
+    for word in msg:lower():gmatch("%S+") do
+        table.insert(args, word)
+    end
+    
+    local command = args[1] or "help"
+    
+    if command == "show" then
+        SD.ToggleDetails(true)
+        -- Removed chat message for showing Details
+    elseif command == "hide" then
+        SD.ToggleDetails(false)
+        -- Removed chat message for hiding Details
+    elseif command == "toggle" then
+        -- Try to detect current state
+        local detailsObject = _G._detalhes and _G._detalhes.tabela_instancias and _G._detalhes.tabela_instancias[1]
+        local isVisible = detailsObject and detailsObject.baseframe and detailsObject.baseframe:IsShown()
+        SD.ToggleDetails(not isVisible)
+        -- Removed chat message for toggling Details
+    elseif command == "delay" then
+        local value = tonumber(args[2])
+        if value and value >= 0 and value <= 30 then
+            SneakyDetailsDB.hidingDelay = value
+            -- Removed chat message for delay change
+        else
+            print("|cff33ff99SneakyDetails|r: Current delay is " .. SneakyDetailsDB.hidingDelay .. " seconds.")
+            print("|cff33ff99SneakyDetails|r: Usage: /sd delay <value> (0-30)")
+        end
+    elseif command == "auto" then
+        if args[2] == "on" then
+            SneakyDetailsDB.autoHide = true
+            print("|cff33ff99SneakyDetails|r: Auto-hiding enabled.")
+        elseif args[2] == "off" then
+            SneakyDetailsDB.autoHide = false
+            print("|cff33ff99SneakyDetails|r: Auto-hiding disabled.")
+        else
+            if SneakyDetailsDB.autoHide then
+                print("|cff33ff99SneakyDetails|r: Auto-hiding is currently enabled.")
+            else
+                print("|cff33ff99SneakyDetails|r: Auto-hiding is currently disabled.")
+            end
+            print("|cff33ff99SneakyDetails|r: Usage: /sd auto on|off")
+        end
+    elseif command == "instance" then
+        if args[2] == "on" then
+            SneakyDetailsDB.disableInInstances = true
+            print("|cff33ff99SneakyDetails|r: Auto-hiding disabled in instances.")
+        elseif args[2] == "off" then
+            SneakyDetailsDB.disableInInstances = false
+            print("|cff33ff99SneakyDetails|r: Auto-hiding enabled in instances.")
+        else
+            if SneakyDetailsDB.disableInInstances then
+                print("|cff33ff99SneakyDetails|r: Auto-hiding is disabled in instances.")
+            else
+                print("|cff33ff99SneakyDetails|r: Auto-hiding is enabled in instances.")
+            end
+            print("|cff33ff99SneakyDetails|r: Usage: /sd instance on|off")
+        end
+    elseif command == "button" then
+        if args[2] == "on" then
+            SneakyDetailsDB.showButton = true
+            if not toggleButton then
+                SD.CreateToggleButton()
+            else
+                toggleButton:Show()
+            end
+            print("|cff33ff99SneakyDetails|r: Toggle button enabled.")
+        elseif args[2] == "off" then
+            SneakyDetailsDB.showButton = false
+            if toggleButton then
+                toggleButton:Hide()
+            end
+            print("|cff33ff99SneakyDetails|r: Toggle button disabled.")
+        else
+            print("|cff33ff99SneakyDetails|r: Toggle button is currently " .. (SneakyDetailsDB.showButton and "enabled" or "disabled") .. ".")
+            print("|cff33ff99SneakyDetails|r: Usage: /sd button on|off")
+        end
+    elseif command == "options" then
+        SD.CreateOptionsFrame()
+        print("|cff33ff99SneakyDetails|r: Opening options window.")
+    elseif command == "status" or command == "info" then
+        print("|cff33ff99SneakyDetails|r: Status:")
+        print("  Auto-hide: " .. (SneakyDetailsDB.autoHide and "Enabled" or "Disabled"))
+        print("  Hide delay: " .. SneakyDetailsDB.hidingDelay .. " seconds")
+        print("  Instance behavior: " .. (SneakyDetailsDB.disableInInstances and "Always show" or "Follow auto-hide rules"))
+        print("  Toggle button: " .. (SneakyDetailsDB.showButton and "Enabled" or "Disabled"))
+        print("  Currently in instance: " .. (inInstance and "Yes" or "No"))
+    elseif command == "reset" then
+        SneakyDetailsDB = {}
+        for k, v in pairs(defaults) do
+            SneakyDetailsDB[k] = v
+        end
+        print("|cff33ff99SneakyDetails|r: Settings reset to defaults.")
+    else
+        print("|cff33ff99SneakyDetails|r: Available commands:")
+        print("  /sd show - Show Details")
+        print("  /sd hide - Hide Details")
+        print("  /sd toggle - Toggle Details visibility")
+        print("  /sd delay [seconds] - Get/set auto-hide delay (0-30)")
+        print("  /sd auto [on|off] - Enable/disable auto-hiding")
+        print("  /sd instance [on|off] - Disable/enable auto-hiding in instances")
+        print("  /sd button [on|off] - Show/hide the toggle button")
+        print("  /sd options - Open the settings window")
+        print("  /sd status - Show current settings")
+        print("  /sd reset - Reset all settings to defaults")
     end
 end
-
--- Register event handler
-SDFrame:SetScript("OnEvent", OnEvent)

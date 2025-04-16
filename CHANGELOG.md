@@ -1,6 +1,17 @@
 # SneakyDetails Changelog
 
-## v1.0.2 (2025-04-10)
+## v1.2.1 (2025-04-16)
+### Added
+- none
+
+### Changed
+- none
+
+### Fixed
+- Included correct updated files
+
+
+## v1.2.0 (2025-04-14)
 ### Added
 - Added click bind to button for opening the main Details options window
 
